@@ -77,7 +77,8 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
 
                 let audio = read_from_path(file.path(), true).into_diagnostic()?;
 
-                let tags = audio.first_tag();
+                let tags = audio.primary_tag().or(audio.first_tag());
+
                 let properties = audio.properties();
 
                 let hash = hash_file(file.path())?;
