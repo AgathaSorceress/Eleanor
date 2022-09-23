@@ -98,6 +98,9 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                     source_id: Set(source.id.into()),
                     hash: Set(hash.try_into().into_diagnostic()?),
                     artist: Set(tags.and_then(|t| t.artist()).map(|t| t.to_string())),
+                    album_artist: Set(tags
+                        .and_then(|t| t.get_string(&lofty::ItemKey::AlbumArtist))
+                        .map(|t| t.to_string())),
                     name: Set(tags.and_then(|t| t.title()).map(|t| t.to_string())),
                     album: Set(tags.and_then(|t| t.album()).map(|t| t.to_string())),
                     genres: Set(tags.and_then(|t| t.genre()).map(|t| t.to_string())),

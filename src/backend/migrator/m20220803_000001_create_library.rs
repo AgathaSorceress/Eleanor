@@ -28,6 +28,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Song::SourceId).integer().not_null())
                     .col(ColumnDef::new(Song::Hash).integer().not_null().unique_key())
                     .col(ColumnDef::new(Song::Artist).string())
+                    .col(ColumnDef::new(Song::AlbumArtist).string())
                     .col(ColumnDef::new(Song::Name).string())
                     .col(ColumnDef::new(Song::Album).string())
                     .col(ColumnDef::new(Song::Duration).integer().not_null())
@@ -60,6 +61,7 @@ pub enum Song {
     /// A hash of the song's samples as Vec<f32>
     Hash,
     Artist,
+    AlbumArtist,
     Name,
     Album,
     Duration,
