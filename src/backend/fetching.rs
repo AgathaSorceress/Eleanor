@@ -65,7 +65,7 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                 .filter(|e| {
                     mime_guess::from_path(e.path())
                         .first()
-                        .and_then(|v| Some(v.type_() == mime::AUDIO))
+                        .map(|v| v.type_() == mime::AUDIO)
                         .unwrap_or(false)
                 })
             {
@@ -97,20 +97,12 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                         .to_string()),
                     source_id: Set(source.id.into()),
                     hash: Set(hash.try_into().into_diagnostic()?),
-                    artist: Set(tags
-                        .and_then(|t| t.artist())
-                        .and_then(|t| Some(t.to_string()))),
-                    name: Set(tags
-                        .and_then(|t| t.title())
-                        .and_then(|t| Some(t.to_string()))),
-                    album: Set(tags
-                        .and_then(|t| t.album())
-                        .and_then(|t| Some(t.to_string()))),
-                    genres: Set(tags
-                        .and_then(|t| t.genre())
-                        .and_then(|t| Some(t.to_string()))),
-                    track: Set(tags.and_then(|t| t.track()).and_then(|t| Some(t as i32))),
-                    year: Set(tags.and_then(|t| t.year()).and_then(|t| Some(t as i32))),
+                    artist: Set(tags.and_then(|t| t.artist()).map(|t| t.to_string())),
+                    name: Set(tags.and_then(|t| t.title()).map(|t| t.to_string())),
+                    album: Set(tags.and_then(|t| t.album()).map(|t| t.to_string())),
+                    genres: Set(tags.and_then(|t| t.genre()).map(|t| t.to_string())),
+                    track: Set(tags.and_then(|t| t.track()).map(|t| t as i32)),
+                    year: Set(tags.and_then(|t| t.year()).map(|t| t as i32)),
                     duration: Set(properties
                         .duration()
                         .as_millis()

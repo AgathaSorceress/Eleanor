@@ -23,6 +23,7 @@ pub struct Source {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(default)]
 pub struct Config {
     pub cache_expire_days: usize,
     pub crossfade: bool,
@@ -31,10 +32,11 @@ pub struct Config {
     pub volume: f32,
     pub sources: Vec<Source>,
 }
+
 impl Config {
     pub fn read_config() -> Result<Self> {
         let file = config_dir()
-            .and_then(|v| Some(v.join("settings.toml")))
+            .map(|v| v.join("settings.toml"))
             .ok_or(miette!("Configuration file not found"))?;
 
         let contents = std::fs::read_to_string(file).into_diagnostic()?;
@@ -46,7 +48,7 @@ impl Config {
         let contents = toml::to_string(config).into_diagnostic()?;
 
         let path = config_dir()
-            .and_then(|v| Some(v.join("settings.toml")))
+            .map(|v| v.join("settings.toml"))
             .ok_or(miette!("Configuration file not found"))?;
 
         File::create(path)
@@ -55,6 +57,7 @@ impl Config {
     }
 }
 
+// TODO: Initialize sources to empty list instead
 impl Default for Config {
     fn default() -> Self {
         Config {

@@ -2,12 +2,12 @@ use miette::{miette, Result};
 use std::path::PathBuf;
 
 pub fn config_dir() -> Option<PathBuf> {
-    dirs::config_dir().and_then(|v| Some(v.join("eleanor")))
+    dirs::config_dir().map(|v| v.join("eleanor"))
 }
 
 #[allow(dead_code)]
 pub fn cache_dir() -> Option<PathBuf> {
-    dirs::cache_dir().and_then(|v| Some(v.join("eleanor")))
+    dirs::cache_dir().map(|v| v.join("eleanor"))
 }
 
 /// If no files have been created in the config directory, the app is running for the first time
