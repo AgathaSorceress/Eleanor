@@ -5,14 +5,17 @@ use std::{
     path::Path,
 };
 
+use crate::backend::utils::get_auth_source;
+
 use super::{
     config::{Config, Source, SourceKind},
-    model::library,
+    model::{library, library::Column},
 };
 use adler::Adler32;
 use lofty::{read_from_path, Accessor, AudioFile};
 use miette::{miette, IntoDiagnostic, Result};
 use paris::{success, warn};
+use reqwest::Client;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
 use symphonia::{
     core::{
@@ -116,7 +119,7 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
 
                 library::Entity::insert(song)
                     .on_conflict(
-                        sea_query::OnConflict::column(library::Column::Filename)
+                        sea_query::OnConflict::column(Column::Hash)
                             .do_nothing()
                             .to_owned(),
                     )
@@ -126,7 +129,54 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
             }
         }
         SourceKind::Remote { address } => {
-            unimplemented!();
+            let (username, password) = get_auth_source(source.id)?;
+
+            let client = Client::new();
+
+            let index = client
+                .get(format!("{address}/"))
+                .basic_auth(username, Some(password))
+                .send()
+                .await
+                .into_diagnostic()?
+                .bytes()
+                .await
+                .into_diagnostic()?;
+
+            // Deserialize messagepack into a library model
+            let parsed: Vec<library::Model> = rmp_serde::from_slice(&index).into_diagnostic()?;
+
+            // Use all fields except for id and source_id
+            let songs: Vec<_> = parsed
+                .into_iter()
+                .map(|v| {
+                    return library::ActiveModel {
+                        path: Set(v.path),
+                        filename: Set(v.filename),
+                        source_id: Set(source.id.into()), // Use local source id, not remote
+                        hash: Set(v.hash),
+                        artist: Set(v.artist),
+                        album_artist: Set(v.album_artist),
+                        name: Set(v.name),
+                        album: Set(v.album),
+                        genres: Set(v.genres),
+                        track: Set(v.track),
+                        year: Set(v.year),
+                        duration: Set(v.duration),
+                        ..Default::default()
+                    };
+                })
+                .collect();
+
+            library::Entity::insert_many(songs)
+                .on_conflict(
+                    sea_query::OnConflict::column(Column::Hash)
+                        .do_nothing()
+                        .to_owned(),
+                )
+                .exec(db)
+                .await
+                .into_diagnostic()?;
         }
     }
 

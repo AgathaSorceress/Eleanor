@@ -12,16 +12,24 @@ use migrator::Migrator;
 use paris::success;
 use sea_orm_migration::prelude::*;
 
-use self::{config::Config, utils::config_dir};
+use self::{
+    config::Config,
+    utils::{cache_dir, config_dir},
+};
 
 /// Create the necessary files on first run
 pub fn create_app_data() -> Result<()> {
-    let path = config_dir().ok_or(miette!("Configuration directory does not exist"))?;
+    let config_path = config_dir().ok_or(miette!("Configuration directory does not exist"))?;
 
     // Create Eleanor's config directory
-    create_dir_all(&path).into_diagnostic()?;
+    create_dir_all(&config_path).into_diagnostic()?;
 
-    File::create(&path.join("eleanor.db")).into_diagnostic()?;
+    let cache_path = cache_dir().ok_or(miette!("Configuration directory does not exist"))?;
+
+    // Create Eleanor's cache directory
+    create_dir_all(&cache_path).into_diagnostic()?;
+
+    File::create(&config_path.join("eleanor.db")).into_diagnostic()?;
     Config::write_config(&Default::default())?;
     success!("Created configuration file");
 

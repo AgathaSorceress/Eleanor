@@ -19,12 +19,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Song::Path).string().not_null())
-                    .col(
-                        ColumnDef::new(Song::Filename)
-                            .string()
-                            .not_null()
-                            .unique_key(),
-                    )
+                    .col(ColumnDef::new(Song::Filename).string().not_null())
                     .col(ColumnDef::new(Song::SourceId).integer().not_null())
                     .col(ColumnDef::new(Song::Hash).integer().not_null().unique_key())
                     .col(ColumnDef::new(Song::Artist).string())
