@@ -1,5 +1,7 @@
 pub mod config;
+pub mod error;
 pub mod fetching;
+pub mod http_decoder;
 mod migrator;
 pub mod model;
 pub mod playback;
@@ -19,15 +21,17 @@ use self::{
 
 /// Create the necessary files on first run
 pub fn create_app_data() -> Result<()> {
+    // Eleanor's config directory
     let config_path = config_dir().ok_or(miette!("Configuration directory does not exist"))?;
-
-    // Create Eleanor's config directory
-    create_dir_all(&config_path).into_diagnostic()?;
-
+    // Eleanor's cache directory
     let cache_path = cache_dir().ok_or(miette!("Configuration directory does not exist"))?;
+    // Directory for remote music cache
+    let music_path = cache_path.join("tracks");
 
-    // Create Eleanor's cache directory
-    create_dir_all(&cache_path).into_diagnostic()?;
+    // Create all required directories
+    for path in [&config_path, &cache_path, &music_path] {
+        create_dir_all(path).into_diagnostic()?;
+    }
 
     File::create(&config_path.join("eleanor.db")).into_diagnostic()?;
     Config::write_config(&Default::default())?;

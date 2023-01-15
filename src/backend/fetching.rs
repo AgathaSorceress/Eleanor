@@ -4,19 +4,19 @@ use std::{
     hash::Hasher,
     path::Path,
 };
+use tokio::sync::Mutex;
 
-use crate::backend::utils::get_auth_source;
-
+use super::error::EleanorError;
 use super::{
-    config::{Config, Source, SourceKind},
+    config::{Source, SourceKind},
     model::{library, library::Column},
+    utils::Context,
 };
 use adler::Adler32;
 use lofty::{read_from_path, Accessor, AudioFile};
-use miette::{miette, IntoDiagnostic, Result};
+use miette::{miette, Result};
 use paris::{success, warn};
-use reqwest::Client;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
 use symphonia::{
     core::{
         io::MediaSourceStream,
@@ -34,8 +34,14 @@ pub enum IndexMode {
     Initial,
 }
 
-pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnection) -> Result<()> {
+pub async fn index_source(
+    source: Source,
+    mode: IndexMode,
+    ctx: &Context,
+) -> Result<(), EleanorError> {
     let mut existing: Vec<OsString> = vec![];
+
+    let db = &ctx.db;
 
     // Force reindex source
     if mode == IndexMode::Purge {
@@ -44,16 +50,14 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
         library::Entity::delete_many()
             .filter(library::Column::SourceId.eq(source.id))
             .exec(db)
-            .await
-            .into_diagnostic()?;
+            .await?;
     // Only index new songs
     } else if mode == IndexMode::New {
         existing = library::Entity::find()
             .filter(library::Column::SourceId.eq(source.id))
             .column(library::Column::Filename)
             .all(db)
-            .await
-            .into_diagnostic()?
+            .await?
             .into_iter()
             .map(|v| v.filename.into())
             .collect();
@@ -78,7 +82,7 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                     };
                 }
 
-                let audio = read_from_path(file.path(), true).into_diagnostic()?;
+                let audio = read_from_path(file.path(), true)?;
 
                 let tags = audio.primary_tag().or(audio.first_tag());
 
@@ -99,7 +103,7 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                         .ok_or(miette!("Couldn't get filename for file {:?}", file))?
                         .to_string()),
                     source_id: Set(source.id.into()),
-                    hash: Set(hash.try_into().into_diagnostic()?),
+                    hash: Set(hash.try_into().map_err(|_| EleanorError::CastError)?),
                     artist: Set(tags.and_then(|t| t.artist()).map(|t| t.to_string())),
                     album_artist: Set(tags
                         .and_then(|t| t.get_string(&lofty::ItemKey::AlbumArtist))
@@ -108,12 +112,15 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                     album: Set(tags.and_then(|t| t.album()).map(|t| t.to_string())),
                     genres: Set(tags.and_then(|t| t.genre()).map(|t| t.to_string())),
                     track: Set(tags.and_then(|t| t.track()).map(|t| t as i32)),
-                    year: Set(tags.and_then(|t| t.year()).map(|t| t as i32)),
+                    year: Set(tags
+                        .and_then(|t| t.year())
+                        .map(|t| if t == 0 { None } else { Some(t as i32) })
+                        .flatten()),
                     duration: Set(properties
                         .duration()
                         .as_millis()
                         .try_into()
-                        .into_diagnostic()?),
+                        .map_err(|_| EleanorError::CastError)?),
                     ..Default::default()
                 };
 
@@ -124,27 +131,34 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                             .to_owned(),
                     )
                     .exec(db)
-                    .await
-                    .into_diagnostic()?;
+                    .await?;
             }
         }
         SourceKind::Remote { address } => {
-            let (username, password) = get_auth_source(source.id)?;
+            let (username, password) = &ctx
+                .auth
+                .get(&source.id)
+                .ok_or(miette!("Couldn't get credentials for source {}", source.id))?;
 
-            let client = Client::new();
+            let client = &ctx.http_client;
 
             let index = client
                 .get(format!("{address}/"))
                 .basic_auth(username, Some(password))
                 .send()
-                .await
-                .into_diagnostic()?
-                .bytes()
-                .await
-                .into_diagnostic()?;
+                .await?;
+
+            // Handle server failures
+            let index = if index.status().is_success() {
+                index.bytes().await?
+            } else {
+                return Err(miette!("Response status: {}", index.status())
+                    .wrap_err(format!("Indexing for source {} failed", source.id))
+                    .into());
+            };
 
             // Deserialize messagepack into a library model
-            let parsed: Vec<library::Model> = rmp_serde::from_slice(&index).into_diagnostic()?;
+            let parsed: Vec<library::Model> = rmp_serde::from_slice(&index)?;
 
             // Use all fields except for id and source_id
             let songs: Vec<_> = parsed
@@ -175,8 +189,7 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
                         .to_owned(),
                 )
                 .exec(db)
-                .await
-                .into_diagnostic()?;
+                .await?;
         }
     }
 
@@ -184,28 +197,30 @@ pub async fn index_source(source: Source, mode: IndexMode, db: &DatabaseConnecti
     Ok(())
 }
 
-pub async fn index_initial(db: &DatabaseConnection) -> Result<()> {
-    let sources = Config::read_config()?.sources;
+pub async fn index_initial(ctx: &Mutex<Context>) -> Result<()> {
+    let context = &ctx.lock().await;
+    let sources = &context.config.sources;
 
     for source in sources {
-        index_source(source, IndexMode::Initial, db).await?;
+        index_source(source.to_owned(), IndexMode::Initial, &context).await?;
     }
 
     Ok(())
 }
 
-pub async fn index_new(db: &DatabaseConnection) -> Result<()> {
-    let sources = Config::read_config()?.sources;
+pub async fn index_new(ctx: &Mutex<Context>) -> Result<()> {
+    let context = &ctx.lock().await;
+    let sources = &context.config.sources;
 
     for source in sources {
-        index_source(source, IndexMode::New, db).await?;
+        index_source(source.to_owned(), IndexMode::New, &context).await?;
     }
 
     Ok(())
 }
 
-fn hash_file(path: &Path) -> Result<u64> {
-    let file = Box::new(File::open(path).into_diagnostic()?);
+fn hash_file(path: &Path) -> Result<u64, EleanorError> {
+    let file = Box::new(File::open(path)?);
 
     let probe = get_probe();
 
@@ -221,8 +236,7 @@ fn hash_file(path: &Path) -> Result<u64> {
                 limit_metadata_bytes: Limit::Maximum(0),
                 limit_visual_bytes: Limit::Maximum(0),
             },
-        )
-        .into_diagnostic()?
+        )?
         .format;
 
     let mut adler = Adler32::new();

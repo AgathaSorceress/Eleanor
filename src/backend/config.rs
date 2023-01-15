@@ -5,7 +5,7 @@ use miette::{miette, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 
 /// Determines if the files will be loaded from a local path or remotely
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum SourceKind {
     /// Path to a directory
@@ -14,7 +14,7 @@ pub enum SourceKind {
     Remote { address: String },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Source {
     pub id: u8,
     pub name: String,
@@ -26,6 +26,7 @@ pub struct Source {
 #[serde(default)]
 pub struct Config {
     pub cache_expire_days: usize,
+    pub chunk_size_bytes: u32,
     pub crossfade: bool,
     pub crossfade_duration: u8,
     pub song_change_notification: bool,
@@ -62,6 +63,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             cache_expire_days: 30,
+            chunk_size_bytes: 64_000,
             crossfade: false,
             crossfade_duration: 5,
             song_change_notification: false,
