@@ -13,7 +13,7 @@
       in {
         packages.default = naersk-lib.buildPackage {
           src = ./.;
-          nativeBuildInputs = with pkgs; [ pkg-config ];
+          nativeBuildInputs = with pkgs; [ pkg-config alsaLib ];
           buildInputs = with pkgs; [ openssl ];
         };
         devShells.default = with pkgs;
@@ -21,6 +21,7 @@
             buildInputs = [
               openssl
               pkg-config
+              alsaLib
               cargo
               rustc
               rustfmt
