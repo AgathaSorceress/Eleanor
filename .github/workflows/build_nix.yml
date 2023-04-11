@@ -1,0 +1,19 @@
+name: "Build legacy Nix package on Ubuntu"
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v12
+      - name: Building package
+        run:  nix-build . -A packages.x86_64-linux.default
+      - name: Get commit hash
+        run:  echo "COMMIT_HASH=${GITHUB_SHA::6}" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v3
+        with:
+          name: eleanor-${{ env.COMMIT_HASH }}-x86_64-linux
+          path: result/bin/eleanor
