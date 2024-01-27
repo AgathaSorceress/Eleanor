@@ -1,21 +1,23 @@
 pub mod config;
-pub mod fetching;
+#[allow(clippy::pedantic)]
 mod migrator;
+#[allow(clippy::pedantic)]
 pub mod model;
-pub mod playback;
+// pub mod playback;
+mod kdl_utils;
+pub mod logging;
 pub mod utils;
 
 use std::fs::{create_dir_all, File};
 
 use miette::{miette, IntoDiagnostic, Result};
 use migrator::Migrator;
-use paris::success;
 use sea_orm_migration::prelude::*;
+use tracing::info;
 
-use self::{
-    config::Config,
-    utils::{cache_dir, config_dir},
-};
+use crate::backend::config::Config;
+
+use self::utils::{cache_dir, config_dir};
 
 /// Create the necessary files on first run
 pub fn create_app_data() -> Result<()> {
@@ -27,11 +29,11 @@ pub fn create_app_data() -> Result<()> {
     let cache_path = cache_dir().ok_or(miette!("Configuration directory does not exist"))?;
 
     // Create Eleanor's cache directory
-    create_dir_all(&cache_path).into_diagnostic()?;
+    create_dir_all(cache_path).into_diagnostic()?;
 
-    File::create(&config_path.join("eleanor.db")).into_diagnostic()?;
-    Config::write_config(&Default::default())?;
-    success!("Created configuration file");
+    File::create(config_path.join("eleanor.db")).into_diagnostic()?;
+    Config::write_config(&Config::default())?;
+    info!("Created configuration file");
 
     Ok(())
 }
@@ -40,7 +42,7 @@ pub fn create_app_data() -> Result<()> {
 pub async fn prepare_db(db: &sea_orm::DatabaseConnection) -> Result<()> {
     Migrator::up(db, None).await.into_diagnostic()?;
 
-    success!("Applied migrations");
+    info!("Applied migrations");
 
     Ok(())
 }

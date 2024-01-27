@@ -1,19 +1,29 @@
-use backend::{
-    create_app_data,
-    fetching::{index_initial, index_new},
-    prepare_db,
+use miette::{ensure, miette, IntoDiagnostic, Result};
+
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+use sea_orm_migration::SchemaManager;
+
+use tracing::info;
+
+use crate::backend::{
+    create_app_data, logging, prepare_db,
     utils::{config_dir, is_first_run},
 };
-use miette::{ensure, miette, IntoDiagnostic, Result};
-use paris::info;
-use sea_orm::{Database, DatabaseConnection};
-use sea_orm_migration::SchemaManager;
 
 mod backend;
 mod gui;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = startup().await {
+        eprintln!("{:?}", e);
+    }
+}
+
+// Separate function to avoid the main function error message prefix
+async fn startup() -> Result<()> {
+    logging::setup();
+
     // First, make sure that the app's files exist
     let first_run = is_first_run()?;
     if first_run {
@@ -22,14 +32,15 @@ async fn main() -> Result<()> {
     }
 
     // Create a database connection
-    let db: DatabaseConnection = Database::connect(&format!(
+    let mut conn = ConnectOptions::new(format!(
         "sqlite://{}/eleanor.db?mode=rwc",
         config_dir()
             .ok_or(miette!("Configuration directory not found"))?
             .display()
-    ))
-    .await
-    .into_diagnostic()?;
+    ));
+    conn.sqlx_logging_level(tracing::log::LevelFilter::Trace);
+
+    let db: DatabaseConnection = Database::connect(conn).await.into_diagnostic()?;
 
     // Run migrations
     prepare_db(&db).await?;
@@ -43,13 +54,6 @@ async fn main() -> Result<()> {
             .into_diagnostic()?,
         miette!("Running migrations failed")
     );
-
-    if first_run {
-        index_initial(&db).await?;
-    } else {
-        // Index only new songs
-        index_new(&db).await?;
-    }
 
     Ok(())
 }
