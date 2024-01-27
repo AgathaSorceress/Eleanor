@@ -16,7 +16,7 @@ mod gui;
 #[tokio::main]
 async fn main() {
     if let Err(e) = startup().await {
-        eprintln!("{:?}", e);
+        eprintln!("{e:?}");
     }
 }
 

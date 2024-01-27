@@ -18,6 +18,7 @@ sea-orm = { version = "0.12.4", features = ["sqlx-sqlite", "runtime-tokio-native
 sea-orm-migration = "0.12.4"
 sea-query = "0.30.2"
 symphonia = { version = "0.5.3", features = ["flac", "mp3", "vorbis", "ogg", "wav"] }
+thiserror = "1.0.56"
 tokio = { version = "1.33.0", features = ["full"] }
 tracing = { version = "0.1.40" }
 tracing-core = "0.1.32"

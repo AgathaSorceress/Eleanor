@@ -1,11 +1,12 @@
 use std::{fmt::Display, fs::File, io::Write};
 
 use super::{
+    error::EleanorError,
     kdl_utils::{KdlDocumentExt, KdlNodeExt},
     utils::config_dir,
 };
 use kdl::{KdlDocument, KdlNode};
-use miette::{miette, IntoDiagnostic, Result};
+use miette::miette;
 
 #[derive(Debug)]
 pub struct Source {
@@ -36,12 +37,12 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn read_config() -> Result<Self> {
+    pub fn read_config() -> Result<Self, EleanorError> {
         let file = config_dir()
             .map(|v| v.join("settings.kdl"))
             .ok_or(miette!("Configuration file not found"))?;
 
-        let contents = std::fs::read_to_string(file).into_diagnostic()?;
+        let contents = std::fs::read_to_string(file)?;
         let kdl_doc: KdlDocument = contents.parse()?;
 
         let playback = kdl_doc.get_children_or("playback", KdlDocument::new());
@@ -71,7 +72,7 @@ impl Config {
             sources
                 .iter()
                 .map(Source::try_from_node)
-                .collect::<Result<_>>()?
+                .collect::<Result<_, EleanorError>>()?
         };
 
         Ok(Self {
@@ -83,7 +84,7 @@ impl Config {
         })
     }
 
-    pub fn write_config(config: &Config) -> Result<()> {
+    pub fn write_config(config: &Config) -> Result<(), EleanorError> {
         let contents = config.to_string();
 
         let path = config_dir()
@@ -92,7 +93,7 @@ impl Config {
 
         File::create(path)
             .and_then(|mut v| v.write_all(contents.as_bytes()))
-            .into_diagnostic()
+            .map_err(Into::into)
     }
 }
 
@@ -133,7 +134,7 @@ impl Display for Config {
 }
 
 impl Source {
-    fn try_from_node(node: &KdlNode) -> Result<Self> {
+    fn try_from_node(node: &KdlNode) -> Result<Self, EleanorError> {
         let name = node.name().value().to_owned();
 
         let id = node
@@ -144,8 +145,7 @@ impl Source {
             .value()
             .as_i64()
             .ok_or(miette!("Source id must be a number"))?
-            .try_into()
-            .into_diagnostic()?;
+            .try_into()?;
 
         let path = node
             .get("path")
