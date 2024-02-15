@@ -22,11 +22,12 @@
           mkShell {
             buildInputs = [
               cargo
+              pre-commit
+              rust-analyzer
+              rustPackages.clippy
               rustc
               rustfmt
-              pre-commit
-              rustPackages.clippy
-              rust-analyzer
+              sea-orm-cli
             ] ++ buildInputs;
             inherit nativeBuildInputs;
 
