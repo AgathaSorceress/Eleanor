@@ -30,6 +30,10 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Song::Genres).string())
                     .col(ColumnDef::new(Song::Track).integer())
                     .col(ColumnDef::new(Song::Year).integer())
+                    .col(ColumnDef::new(Song::RGTrackGain).double())
+                    .col(ColumnDef::new(Song::RGTrackPeak).double())
+                    .col(ColumnDef::new(Song::RGAlbumGain).double())
+                    .col(ColumnDef::new(Song::RGAlbumPeak).double())
                     .to_owned(),
             )
             .await
@@ -55,6 +59,7 @@ pub enum Song {
     SourceId,
     /// A hash of the song's samples as Vec<f32>
     Hash,
+    /// Track artist
     Artist,
     AlbumArtist,
     Name,
@@ -65,4 +70,8 @@ pub enum Song {
     /// Number of the track in the album
     Track,
     Year,
+    RGTrackGain,
+    RGTrackPeak,
+    RGAlbumGain,
+    RGAlbumPeak,
 }
