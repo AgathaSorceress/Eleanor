@@ -29,6 +29,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Song::Duration).integer().not_null())
                     .col(ColumnDef::new(Song::Genres).string())
                     .col(ColumnDef::new(Song::Track).integer())
+                    .col(ColumnDef::new(Song::Disc).integer())
                     .col(ColumnDef::new(Song::Year).integer())
                     .col(ColumnDef::new(Song::RGTrackGain).double())
                     .col(ColumnDef::new(Song::RGTrackPeak).double())
@@ -69,6 +70,7 @@ pub enum Song {
     Genres,
     /// Number of the track in the album
     Track,
+    Disc,
     Year,
     RGTrackGain,
     RGTrackPeak,

@@ -5,3 +5,4 @@ pub mod prelude;
 pub mod library;
 pub mod playlist_entries;
 pub mod playlists;
+pub mod sources;

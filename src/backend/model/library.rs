@@ -9,7 +9,7 @@ pub struct Model {
     pub id: i32,
     pub path: String,
     pub filename: String,
-    pub source_id: i32,
+    pub source_id: u32,
     pub hash: u32,
     pub artist: Option<String>,
     pub album_artist: Option<String>,
@@ -18,6 +18,7 @@ pub struct Model {
     pub duration: u32,
     pub genres: Option<String>,
     pub track: Option<i32>,
+    pub disc: Option<i32>,
     pub year: Option<i32>,
     #[sea_orm(column_type = "Double", nullable)]
     pub rg_track_gain: Option<f64>,

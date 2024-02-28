@@ -1,12 +1,14 @@
 pub mod config;
+pub mod error;
+pub mod indexing;
+mod kdl_utils;
+pub mod logging;
 #[allow(clippy::pedantic)]
 mod migrator;
 #[allow(clippy::pedantic)]
 pub mod model;
-// pub mod playback;
-pub mod error;
-mod kdl_utils;
-pub mod logging;
+pub mod playback;
+pub mod replaygain;
 pub mod utils;
 
 use std::fs::{create_dir_all, File};

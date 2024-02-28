@@ -8,7 +8,7 @@ use super::{
 use kdl::{KdlDocument, KdlNode};
 use miette::miette;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Source {
     pub id: u32,
     pub name: String,

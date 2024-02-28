@@ -3,3 +3,4 @@
 pub use super::library::Entity as Library;
 pub use super::playlist_entries::Entity as PlaylistEntries;
 pub use super::playlists::Entity as Playlists;
+pub use super::sources::Entity as Sources;
