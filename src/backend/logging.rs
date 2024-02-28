@@ -2,7 +2,9 @@ use chrono::{DateTime, Local};
 use owo_colors::{AnsiColors, OwoColorize};
 use std::io::{stdout, IsTerminal};
 use std::{env, fmt};
+use tracing::enabled;
 use tracing_core::{Event, Level, LevelFilter, Subscriber};
+use tracing_subscriber::reload;
 use tracing_subscriber::{
     field::MakeExt,
     fmt::{
@@ -75,6 +77,10 @@ where
 }
 
 // Set up tracing-subscriber
+//
+// By default, log level is INFO for release builds and DEBUG for debug builds.
+// `RUST_LOG` can be set to override the log level.
+// if `ELEANOR_VERBOSE` is set, logs will contain more information, but will also be noisier.
 pub fn setup() {
     // default to INFO for release builds, DEBUG otherwise
     const LEVEL: LevelFilter = if cfg!(debug_assertions) {
@@ -98,7 +104,7 @@ pub fn setup() {
     })
     .delimited("\n\t · ");
 
-    let output = match env::var("ELEANOR_VERBOSE") {
+    let verbosity = match env::var("ELEANOR_VERBOSE") {
         Ok(_) => tracing_subscriber::fmt::layer()
             .with_ansi(stdout().is_terminal())
             .event_format(format())
@@ -111,11 +117,24 @@ pub fn setup() {
             .boxed(),
     };
 
-    let log = tracing_subscriber::registry().with(output);
-
-    if env::var("RUST_LOG").is_ok_and(|v| !v.is_empty()) {
-        log.with(EnvFilter::from_default_env()).init();
+    let level = if env::var("RUST_LOG").is_ok_and(|v| !v.is_empty()) {
+        EnvFilter::from_default_env().boxed()
     } else {
-        log.with(LEVEL).init();
+        LEVEL.boxed()
+    };
+
+    let (filter, reload_handle) = reload::Layer::new(EnvFilter::new("trace"));
+
+    tracing_subscriber::registry()
+        .with(verbosity)
+        .with(level)
+        .with(filter)
+        .init();
+
+    // Needs to be done after subscriber initialization, as otherwise `enabled!()` will always return false.
+    if !enabled!(Level::TRACE) {
+        reload_handle
+            .modify(|filter| *filter = EnvFilter::new("debug,symphonia=warn,lofty=info"))
+            .expect("Tracing subscriber reload failed");
     }
 }
