@@ -1,13 +1,14 @@
 use std::{ffi::OsStr, fs::File, hash::Hasher, path::Path};
 
 use adler::Adler32;
-use lofty::{AudioFile, ItemKey, TaggedFileExt};
+use lofty::{AudioFile, TaggedFileExt};
 use miette::{miette, IntoDiagnostic, Result};
 use rayon::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
 use symphonia::{
     core::{
-        formats::{FormatOptions, FormatReader},
+        errors::Error as SymphoniaError,
+        formats::{FormatOptions, FormatReader, Packet},
         io::{MediaSourceStream, MediaSourceStreamOptions},
         meta::{Limit, MetadataOptions},
         probe::Hint,
@@ -18,7 +19,7 @@ use time::OffsetDateTime;
 use tracing::debug;
 use walkdir::{DirEntry, WalkDir};
 
-use crate::backend::replaygain::{format_gain, ReplayGain};
+use crate::backend::replaygain::{ReplayGain, ReplayGainResult};
 
 use super::{
     config::Source,
@@ -49,14 +50,116 @@ fn get_packets(path: &Path) -> Result<Box<dyn FormatReader>> {
         .map(|v| v.format)
 }
 
-fn hash_packets(data: &mut Box<dyn FormatReader>) -> u64 {
-    let mut adler = Adler32::new();
+struct FormatReaderIter {
+    inner: Box<dyn FormatReader>,
+    error: Option<SymphoniaError>,
+    hash: Adler32,
+    rg: ReplayGainState,
+}
 
-    while let Ok(packet) = data.next_packet() {
-        adler.write(&packet.data);
+enum ReplayGainState {
+    Finished(ReplayGainResult),
+    Computing(ReplayGain),
+    Failed(EleanorError),
+}
+
+impl ReplayGainState {
+    fn handle_packet(&mut self, packet: &Packet) {
+        if let ReplayGainState::Computing(rg) = self {
+            let result = rg.handle_packet(packet);
+
+            if let Err(e) = result {
+                *self = ReplayGainState::Failed(e);
+            }
+        }
+    }
+}
+
+impl FormatReaderIter {
+    /// Initialize a new iterator over `FormatReader`.
+    /// Track ReplayGain values will be computed if `rg` is None.
+    fn new(
+        inner: Box<dyn FormatReader>,
+        rg: Option<ReplayGainResult>,
+    ) -> Result<Self, EleanorError> {
+        let track = inner
+            .default_track()
+            .ok_or_else(|| miette!("No default track was found"))?;
+        let params = &track.codec_params;
+
+        let (sample_rate, channels) = (params.sample_rate, params.channels);
+
+        // Only stereo is supported.
+        if !channels.is_some_and(|x| x.count() == 2) {
+            return Err(miette!("Unsupported channel configuration: {:?}", channels).into());
+        }
+
+        let Some(sample_rate) = sample_rate else {
+            return Err(miette!("Sample rate must be known").into());
+        };
+
+        let rg = match rg {
+            Some(rg_res) => ReplayGainState::Finished(rg_res),
+            None => match ReplayGain::init(sample_rate as usize, track)
+                .map(ReplayGainState::Computing)
+            {
+                Ok(rg) => rg,
+                Err(e) => ReplayGainState::Failed(e),
+            },
+        };
+
+        Ok(Self {
+            inner,
+            error: None,
+            hash: Adler32::new(),
+            rg,
+        })
     }
 
-    adler.finish()
+    fn process(mut self) -> (u64, Result<ReplayGainResult, EleanorError>) {
+        // loop over all packets
+        while let Some(packet) = (&mut self).next() {
+            // hash the packet
+            self.hash.write(&packet.data);
+            // copy into replaygain
+            self.rg.handle_packet(&packet);
+        }
+
+        let hash = self.hash.finish();
+
+        // check for error during iteration
+        if let Some(error) = self.error {
+            return (hash, Err(error.into()));
+        }
+
+        let rg = match self.rg {
+            ReplayGainState::Finished(rg_res) => Ok(rg_res),
+            ReplayGainState::Computing(rg) => rg.finish(),
+            ReplayGainState::Failed(e) => Err(e),
+        };
+
+        (hash, rg)
+    }
+}
+
+impl Iterator for &mut FormatReaderIter {
+    type Item = Packet;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let res_packet = self.inner.next_packet();
+        match res_packet {
+            Err(symphonia::core::errors::Error::IoError(ref packet_error))
+                if packet_error.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                None
+            }
+            Err(e) => {
+                self.error = Some(e);
+                None
+            }
+            Ok(packet) => Some(packet),
+        }
+    }
 }
 
 fn index_song(
@@ -87,42 +190,14 @@ fn index_song(
     let tags = tagged_file.primary_tag().or(tagged_file.first_tag());
     let properties = tagged_file.properties();
 
-    // Hash audio packets
-    let mut packets = get_packets(file.path())?;
-    let hash = hash_packets(&mut packets);
+    // Hash audio packets and calculate replaygain
+    let (hash, rg) = FormatReaderIter::new(
+        get_packets(file.path())?,
+        ReplayGainResult::try_from(tags).ok(),
+    )?
+    .process();
 
-    let rg_track_gain = tags
-        .and_then(|t| t.get_string(&ItemKey::ReplayGainTrackGain))
-        .and_then(|v| format_gain(v).ok());
-    let rg_track_peak = tags
-        .and_then(|t| t.get_string(&ItemKey::ReplayGainTrackPeak))
-        .and_then(|v| format_gain(v).ok());
-    let rg_album_gain = tags
-        .and_then(|t| t.get_string(&ItemKey::ReplayGainAlbumGain))
-        .and_then(|v| format_gain(v).ok());
-    let rg_album_peak = tags
-        .and_then(|t| t.get_string(&ItemKey::ReplayGainAlbumPeak))
-        .and_then(|v| format_gain(v).ok());
-
-    // Check for existing ReplayGain tags.
-    let mut rg = if let (Some(track_gain), Some(track_peak)) = (rg_track_gain, rg_track_peak) {
-        Ok(ReplayGain {
-            track_gain,
-            track_peak,
-            album_gain: None,
-            album_peak: None,
-        })
-    } else {
-        // Calculate replaygain values for the audio track
-        let mut packets = get_packets(file.path())?;
-        ReplayGain::try_calculate(&mut packets)
-    };
-
-    // Set album gain and peak, if present in metadata.
-    if let Ok(rg) = &mut rg {
-        rg.album_gain = rg_album_gain;
-        rg.album_peak = rg_album_peak;
-    }
+    let rg = rg?;
 
     let song: library::ActiveModel = library::ActiveModel {
         path: Set(file
@@ -151,18 +226,10 @@ fn index_song(
         disc: Set(tags.and_then(lofty::Accessor::disk).map(|t| t as i32)),
         year: Set(tags.and_then(lofty::Accessor::year).map(|t| t as i32)),
         duration: Set(properties.duration().as_millis().try_into()?),
-        rg_track_gain: Set(rg.as_ref().map(|v| f64::from(v.track_gain)).ok()),
-        rg_track_peak: Set(rg.as_ref().map(|v| f64::from(v.track_peak)).ok()),
-        rg_album_gain: Set(rg
-            .as_ref()
-            .map(|v| v.album_gain.map(f64::from))
-            .ok()
-            .flatten()),
-        rg_album_peak: Set(rg
-            .as_ref()
-            .map(|v| v.album_peak.map(f64::from))
-            .ok()
-            .flatten()),
+        rg_track_gain: Set(Some(rg.track_gain.into())),
+        rg_track_peak: Set(Some(rg.track_peak.into())),
+        rg_album_gain: Set(rg.album_gain.map(f64::from)),
+        rg_album_peak: Set(rg.album_peak.map(f64::from)),
         ..Default::default()
     };
 

@@ -55,5 +55,11 @@ async fn startup() -> Result<()> {
         miette!("Running migrations failed")
     );
 
+    let sources = backend::config::Config::read_config()?.sources;
+
+    for source in sources {
+        backend::indexing::index_source(source, true, &db).await?;
+    }
+
     Ok(())
 }
